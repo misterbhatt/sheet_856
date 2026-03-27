@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>HP 856 Advanced Naming Tool</title>
+
+<style>
+body { font-family: Arial; background:#f4f6f9; padding:20px;}
+table { border-collapse: collapse; width:100%; margin-top:20px;}
+th, td { border:1px solid #ccc; padding:6px; font-size:12px;}
+th { background:#007bff; color:white;}
+button { padding:10px; margin:5px; background:#28a745; color:white;}
+select { padding:8px; margin:5px;}
+</style>
+</head>
+
+<body>
+
+<h2>HP 856 Column Generator (Advanced Naming)</h2>
+
+<input type="file" id="file" multiple>
+
+<br><br>
+
+<label><b>Naming Mode:</b></label>
+<select id="namingMode">
+  <option value="position">Position Based (ISA01)</option>
+  <option value="element">Element ID Based (I01 style)</option>
+</select>
+
+<br><br>
+
+<button onclick="process()">Process</button>
+<button onclick="download()">Download Excel</button>
+
+<table id="table"></table>
+
+<script>
+
+let finalData = [];
+
+// 🔥 ELEMENT MAP WITH REF IDs (AS PER DOC STYLE)
+const elementMap = {
+
+  ISA: [
+    ["I01","Authorization_Information_Qualifier"],
+    ["I02","Authorization_Information"],
+    ["I03","Security_Information_Qualifier"],
+    ["I04","Security_Information"],
+    ["I05","Interchange_ID_Qualifier"],
+    ["I06","Interchange_Sender_ID"],
+    ["I07","Interchange_ID_Qualifier"],
+    ["I08","Interchange_Receiver_ID"],
+    ["I09","Date"],
+    ["I10","Time"],
+    ["I11","Repetition_Separator"],
+    ["I12","Interchange_Control_Version_Number"],
+    ["I13","Interchange_Control_Number"],
+    ["I14","Acknowledgment_Requested"],
+    ["I15","Usage_Indicator"],
+    ["I16","Component_Element_Separator"]
+  ],
+
+  DTM: [
+    ["374","Date_Time_Qualifier"],
+    ["373","Date"],
+    ["337","Time"],
+    ["623","Time_Code"]
+  ],
+
+  REF: [
+    ["128","Reference_Identification_Qualifier"],
+    ["127","Reference_Identification"],
+    ["352","Description"]
+  ],
+
+  N1: [
+    ["98","Entity_Identifier_Code"],
+    ["93","Name"],
+    ["66","Identification_Code_Qualifier"],
+    ["67","Identification_Code"]
+  ],
+
+  HL: [
+    ["628","Hierarchical_ID_Number"],
+    ["734","Hierarchical_Parent_ID_Number"],
+    ["735","Hierarchical_Level_Code"],
+    ["736","Hierarchical_Child_Code"]
+  ],
+
+  BSN: [
+    ["353","Transaction_Set_Purpose_Code"],
+    ["396","Shipment_Identification"],
+    ["373","Date"],
+    ["337","Time"],
+    ["1005","Hierarchical_Structure_Code"],
+    ["640","Transaction_Type_Code"]
+  ],
+
+  LIN: [
+    ["350","Assigned_Identification"],
+    ["235","Product_ID_Qualifier"],
+    ["234","Product_ID"]
+  ],
+
+  SN1: [
+    ["350","Assigned_ID"],
+    ["382","Number_of_Units_Shipped"],
+    ["355","Unit_or_Basis_for_Measurement_Code"]
+  ]
+};
+
+// ===== PROCESS =====
+async function process(){
+
+  finalData = [];
+
+  let files = document.getElementById("file").files;
+
+  for(let f of files){
+    let text = await f.text();
+    parse(text);
+  }
+
+  render();
+}
+
+// ===== PARSER =====
+function parse(text){
+
+  let segments = text.split(/\r?\n/);
+  let row = {};
+  let counters = {};
+
+  let mode = document.getElementById("namingMode").value;
+
+  segments.forEach(seg => {
+
+    if(!seg.trim()) return;
+
+    let parts = seg.split("^");
+    let tag = parts[0];
+
+    if(!counters[tag]) counters[tag]=1;
+    else counters[tag]++;
+
+    let index = counters[tag];
+    let mapping = elementMap[tag];
+
+    for(let i=1;i<parts.length;i++){
+
+      let elementName = mapping && mapping[i-1]
+        ? mapping[i-1][1]
+        : "Unknown";
+
+      let refCode = mapping && mapping[i-1]
+        ? mapping[i-1][0]
+        : "X"+i;
+
+      let colName;
+
+      if(mode==="position"){
+        colName = `${tag}${String(i).padStart(2,"0")}_${elementName}_${index}`;
+      } else {
+        colName = `${tag}_${refCode}_${elementName}_${index}`;
+      }
+
+      row[colName] = parts[i];
+    }
+
+  });
+
+  finalData.push(row);
+}
+
+// ===== RENDER =====
+function render(){
+
+  let table = document.getElementById("table");
+  table.innerHTML="";
+
+  if(finalData.length===0) return;
+
+  let headers = Object.keys(finalData[0]);
+
+  let tr="<tr>";
+  headers.forEach(h=> tr+=`<th>${h}</th>`);
+  tr+="</tr>";
+
+  table.innerHTML+=tr;
+
+  finalData.forEach(r=>{
+    let row="<tr>";
+    headers.forEach(h=> row+=`<td>${r[h]||""}</td>`);
+    row+="</tr>";
+    table.innerHTML+=row;
+  });
+}
+
+// ===== DOWNLOAD =====
+function download(){
+
+  let html = document.getElementById("table").outerHTML;
+
+  let blob = new Blob([html], {type:"application/vnd.ms-excel"});
+
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="HP_856_Advanced.xlsx";
+  a.click();
+}
+
+</script>
+
+</body>
+</html>
