@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>HP 856 Enterprise Transformer</title>
+
+<style>
+body { font-family: Arial; background:#f4f6f9; padding:20px;}
+h2 { text-align:center; }
+
+.box { background:#fff; padding:15px; margin-bottom:15px; border-radius:8px; }
+
+table { border-collapse: collapse; width:100%; margin-top:10px;}
+th, td { border:1px solid #ccc; padding:6px; font-size:12px;}
+th { background:#007bff; color:white;}
+
+button { padding:8px 12px; margin:5px; background:#28a745; color:white; border:none; cursor:pointer;}
+</style>
+</head>
+
+<body>
+
+<h2>HP 856 Full + Shipment View Tool</h2>
+
+<div class="box">
+<input type="file" id="files" multiple>
+<button onclick="processFiles()">Process Files</button>
+</div>
+
+<div class="box">
+<button onclick="downloadExcel()">Download Excel</button>
+</div>
+
+<div class="box">
+<h3>Shipment Business View</h3>
+<table id="businessTable"></table>
+</div>
+
+<div class="box">
+<h3>Full Raw Data (All Elements)</h3>
+<table id="fullTable"></table>
+</div>
+
+<script>
+
+let fullData = [];
+let businessData = [];
+
+// 🔥 ELEMENT MAP (extend anytime)
+const elementMap = {
+  GS:["Functional_ID","Sender","Receiver","Date","Time","Group_Control","Agency","Version"],
+  ST:["Txn_ID","Control_Number"],
+  BSN:["Purpose","Shipment_ID","Date","Time","Hierarchy","Type"],
+  HL:["ID","Parent","Level","Child"],
+  REF:["Qualifier","Value"],
+  LIN:["Line","Qualifier","Item_ID"],
+  SN1:["Line","Qty","UOM"],
+  N1:["Entity","Name","Qualifier","Code"],
+  N3:["Addr1","Addr2"],
+  N4:["City","State","Zip","Country"]
+};
+
+// ===== PROCESS =====
+async function processFiles(){
+
+  fullData = [];
+  businessData = [];
+
+  let files = document.getElementById("files").files;
+
+  for(let f of files){
+    let txt = await f.text();
+    parse(txt);
+  }
+
+  renderFull();
+  renderBusiness();
+}
+
+// ===== PARSER =====
+function parse(text){
+
+  let segments = text.split(/\r?\n/);
+
+  let ctx = {shipment:{},order:{},tare:{},pack:{},item:{}};
+
+  segments.forEach(seg=>{
+
+    if(!seg.trim()) return;
+
+    let parts = seg.split("^");
+    let tag = parts[0];
+
+    // 🔥 FULL DATA (ALL ELEMENTS)
+    let row = {Segment:tag};
+
+    let map = elementMap[tag];
+
+    for(let i=1;i<parts.length;i++){
+      let name = map && map[i-1] ? map[i-1] : "Unknown";
+      row[`${tag}${String(i).padStart(2,"0")}_${name}`] = parts[i];
+    }
+
+    fullData.push(row);
+
+    // ===== BUSINESS LOGIC =====
+
+    if(tag==="BSN"){
+      ctx.shipment.id = parts[2];
+      ctx.shipment.date = parts[3];
+    }
+
+    if(tag==="HL"){
+      let lvl = parts[3];
+      if(lvl==="S"){ ctx.tare={}; ctx.pack={}; ctx.item={}; }
+      if(lvl==="O") ctx.order={};
+      if(lvl==="T") ctx.tare={};
+      if(lvl==="P") ctx.pack={};
+      if(lvl==="I") ctx.item={};
+    }
+
+    if(tag==="PRF"){
+      ctx.order.po = parts[1];
+    }
+
+    if(tag==="N1"){
+      if(parts[1]==="SF") ctx.shipment.from = parts[2];
+      if(parts[1]==="ST") ctx.shipment.to = parts[2];
+    }
+
+    if(tag==="REF"){
+      ctx.shipment["REF_"+parts[1]] = parts[2];
+    }
+
+    if(tag==="MAN"){
+      ctx.pack.tracking = parts[2];
+    }
+
+    if(tag==="CLD"){
+      ctx.tare.pallet = parts[1];
+    }
+
+    if(tag==="LIN"){
+      ctx.item.id = parts[3];
+    }
+
+    if(tag==="SN1"){
+
+      ctx.item.qty = parts[2];
+      ctx.item.uom = parts[3];
+
+      businessData.push({
+        Shipment_ID: ctx.shipment.id || "",
+        Shipment_Date: ctx.shipment.date || "",
+        PO: ctx.order.po || "",
+        Item: ctx.item.id || "",
+        Qty: ctx.item.qty || "",
+        UOM: ctx.item.uom || "",
+        Tracking: ctx.pack.tracking || "",
+        Pallet: ctx.tare.pallet || "",
+        From: ctx.shipment.from || "",
+        To: ctx.shipment.to || ""
+      });
+    }
+
+  });
+}
+
+// ===== RENDER FULL =====
+function renderFull(){
+
+  renderTable("fullTable", fullData);
+}
+
+// ===== RENDER BUSINESS =====
+function renderBusiness(){
+
+  renderTable("businessTable", businessData);
+}
+
+// ===== GENERIC TABLE =====
+function renderTable(id, data){
+
+  let table = document.getElementById(id);
+  table.innerHTML = "";
+
+  if(data.length===0) return;
+
+  let headers = new Set();
+  data.forEach(r=> Object.keys(r).forEach(k=>headers.add(k)));
+  headers = Array.from(headers);
+
+  let tr="<tr>";
+  headers.forEach(h=> tr+=`<th>${h}</th>`);
+  tr+="</tr>";
+
+  table.innerHTML+=tr;
+
+  data.forEach(r=>{
+    let row="<tr>";
+    headers.forEach(h=> row+=`<td>${r[h]||""}</td>`);
+    row+="</tr>";
+    table.innerHTML+=row;
+  });
+}
+
+// ===== DOWNLOAD =====
+function downloadExcel(){
+
+  let html = `
+  <html>
+  <body>
+
+  <h2>Shipment Business View</h2>
+  ${document.getElementById("businessTable").outerHTML}
+
+  <br><br>
+
+  <h2>Full EDI Data</h2>
+  ${document.getElementById("fullTable").outerHTML}
+
+  </body>
+  </html>
+  `;
+
+  let blob = new Blob([html], {type:"application/vnd.ms-excel"});
+
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="HP_856_Complete_Report.xls";
+  a.click();
+}
+
+</script>
+
+</body>
+</html>

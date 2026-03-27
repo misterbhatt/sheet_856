@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>HP 856 Column-Based EDI Tool</title>
+
+<style>
+body { font-family: Arial; background:#f4f6f9; padding:20px;}
+table { border-collapse: collapse; width:100%; margin-top:20px;}
+th, td { border:1px solid #ccc; padding:6px; font-size:12px;}
+th { background:#007bff; color:white;}
+button { padding:10px; margin:5px; background:#28a745; color:white;}
+</style>
+</head>
+
+<body>
+
+<h2>HP 856 → Column-Based Excel Generator</h2>
+
+<input type="file" id="file" multiple>
+<button onclick="process()">Process</button>
+<button onclick="download()">Download Excel</button>
+
+<table id="table"></table>
+
+<script>
+
+let finalData = [];
+
+// 🔥 COMPLETE ELEMENT NAME DICTIONARY (EXTENDABLE)
+const elementMap = {
+
+  DTM: [
+    "Date_Time_Qualifier",
+    "Date",
+    "Time",
+    "Time_Code"
+  ],
+
+  REF: [
+    "Reference_Qualifier",
+    "Reference_Identification",
+    "Description"
+  ],
+
+  N1: [
+    "Entity_Identifier_Code",
+    "Name",
+    "ID_Code_Qualifier",
+    "ID_Code"
+  ],
+
+  N3: ["Address_Line1","Address_Line2"],
+
+  N4: ["City","State","Postal_Code","Country"],
+
+  HL: [
+    "Hierarchical_ID_Number",
+    "Parent_ID_Number",
+    "Hierarchical_Level_Code",
+    "Child_Code"
+  ],
+
+  LIN: [
+    "Assigned_ID",
+    "Product_ID_Qualifier",
+    "Product_ID"
+  ],
+
+  SN1: [
+    "Assigned_ID",
+    "Number_of_Units_Shipped",
+    "Unit_of_Measure"
+  ],
+
+  BSN: [
+    "Transaction_Set_Purpose_Code",
+    "Shipment_Identification",
+    "Date",
+    "Time",
+    "Hierarchy_Code"
+  ],
+
+  PRF: ["Purchase_Order_Number"],
+
+  MAN: [
+    "Marks_Qualifier",
+    "Marks_Number"
+  ]
+};
+
+// ===== PROCESS =====
+async function process(){
+
+  finalData = [];
+
+  let files = document.getElementById("file").files;
+
+  for(let f of files){
+    let text = await f.text();
+    parse(text);
+  }
+
+  render();
+}
+
+// ===== CORE LOGIC =====
+function parse(text){
+
+  let segments = text.split(/\r?\n/);
+
+  let row = {};
+  let counters = {}; // track multiple occurrences
+
+  segments.forEach(seg => {
+
+    if(!seg.trim()) return;
+
+    let parts = seg.split("^");
+    let tag = parts[0];
+
+    if(!counters[tag]) counters[tag] = 1;
+    else counters[tag]++;
+
+    let index = counters[tag];
+
+    let mapping = elementMap[tag];
+
+    for(let i=1;i<parts.length;i++){
+
+      let elementName = mapping && mapping[i-1] 
+        ? mapping[i-1] 
+        : "Unknown";
+
+      let colName = `${tag}${String(i).padStart(2,"0")}_${elementName}_${index}`;
+
+      row[colName] = parts[i];
+    }
+
+  });
+
+  finalData.push(row);
+}
+
+// ===== RENDER =====
+function render(){
+
+  let table = document.getElementById("table");
+  table.innerHTML="";
+
+  if(finalData.length===0) return;
+
+  let headers = Object.keys(finalData[0]);
+
+  let tr="<tr>";
+  headers.forEach(h=> tr+=`<th>${h}</th>`);
+  tr+="</tr>";
+
+  table.innerHTML+=tr;
+
+  finalData.forEach(r=>{
+    let row="<tr>";
+    headers.forEach(h=> row+=`<td>${r[h]||""}</td>`);
+    row+="</tr>";
+    table.innerHTML+=row;
+  });
+}
+
+// ===== DOWNLOAD =====
+function download(){
+
+  let html = document.getElementById("table").outerHTML;
+
+  let blob = new Blob([html], {type:"application/vnd.ms-excel"});
+
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="HP_856_Column_Format.xls";
+  a.click();
+}
+
+</script>
+
+</body>
+</html>

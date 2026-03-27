@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>HP 856 Full Parser (Zero Data Loss)</title>
+
+<style>
+body { font-family: Arial; padding:20px; background:#f4f6f9;}
+table { border-collapse: collapse; width:100%; margin-top:20px;}
+th, td { border:1px solid #ccc; padding:5px; font-size:12px;}
+th { background:#007bff; color:white;}
+button { padding:10px; margin:5px; background:#28a745; color:white;}
+</style>
+</head>
+
+<body>
+
+<h2>HP 856 Complete Parser (All Elements)</h2>
+
+<input type="file" id="file" multiple>
+<button onclick="process()">Process</button>
+
+<button onclick="download()">Download Excel</button>
+
+<table id="table"></table>
+
+<script>
+
+let finalData = [];
+
+// 🔥 MASTER ELEMENT DICTIONARY (extendable)
+const elementMap = {
+
+  GS: [
+    "Functional_Identifier_Code",
+    "Application_Sender_Code",
+    "Application_Receiver_Code",
+    "Date",
+    "Time",
+    "Group_Control_Number",
+    "Agency_Code",
+    "Version"
+  ],
+
+  ST: [
+    "Transaction_Set_ID",
+    "Control_Number",
+    "Implementation_Reference"
+  ],
+
+  BSN: [
+    "Purpose_Code",
+    "Shipment_ID",
+    "Shipment_Date",
+    "Shipment_Time",
+    "Hierarchy_Code",
+    "Transaction_Type"
+  ],
+
+  HL: [
+    "Hierarchical_ID",
+    "Parent_ID",
+    "Level_Code",
+    "Child_Code"
+  ],
+
+  REF: [
+    "Reference_Qualifier",
+    "Reference_Value"
+  ],
+
+  LIN: [
+    "Line_Number",
+    "Qualifier",
+    "Item_ID"
+  ],
+
+  SN1: [
+    "Assigned_ID",
+    "Quantity",
+    "UOM"
+  ],
+
+  N1: [
+    "Entity_Code",
+    "Name",
+    "ID_Qualifier",
+    "ID_Code"
+  ],
+
+  N3: ["Address1", "Address2"],
+
+  N4: ["City","State","Postal","Country"],
+
+  SE: ["Segment_Count","Control_Number"],
+
+  GE: ["Transaction_Count","Group_Control"],
+
+  IEA: ["Group_Count","Control_Number"]
+};
+
+// 🔥 PROCESS FILE
+async function process(){
+
+  finalData = [];
+
+  let files = document.getElementById("file").files;
+
+  for(let f of files){
+    let text = await f.text();
+    parse(text);
+  }
+
+  render();
+}
+
+// 🔥 PARSER (NO DATA LOSS)
+function parse(text){
+
+  let segments = text.split(/\r?\n/);
+
+  segments.forEach(seg => {
+
+    if(!seg.trim()) return;
+
+    let parts = seg.split("^");
+    let tag = parts[0];
+
+    let row = {
+      Segment: tag
+    };
+
+    let mapping = elementMap[tag];
+
+    for(let i=1;i<parts.length;i++){
+
+      let value = parts[i];
+
+      if(mapping && mapping[i-1]){
+        row[`${tag}${i.toString().padStart(2,"0")}_${mapping[i-1]}`] = value;
+      } else {
+        // 🔥 fallback (future-proof)
+        row[`${tag}${i.toString().padStart(2,"0")}_Unknown`] = value;
+      }
+    }
+
+    finalData.push(row);
+  });
+}
+
+// ===== RENDER =====
+function render(){
+
+  let table = document.getElementById("table");
+  table.innerHTML = "";
+
+  if(finalData.length===0) return;
+
+  let headers = new Set();
+
+  finalData.forEach(r=>{
+    Object.keys(r).forEach(k=>headers.add(k));
+  });
+
+  headers = Array.from(headers);
+
+  let tr="<tr>";
+  headers.forEach(h=> tr+=`<th>${h}</th>`);
+  tr+="</tr>";
+
+  table.innerHTML+=tr;
+
+  finalData.forEach(r=>{
+    let row="<tr>";
+    headers.forEach(h=>{
+      row+=`<td>${r[h]||""}</td>`;
+    });
+    row+="</tr>";
+    table.innerHTML+=row;
+  });
+}
+
+// ===== DOWNLOAD =====
+function download(){
+
+  let html = document.getElementById("table").outerHTML;
+
+  let blob = new Blob([html], {type:"application/vnd.ms-excel"});
+
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="Full_856_Data.xls";
+  a.click();
+}
+
+</script>
+
+</body>
+</html>

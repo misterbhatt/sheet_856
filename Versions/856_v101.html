@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EDI 856 Parser Tool</title>
+
+<style>
+body {
+  font-family: Arial;
+  background: #f4f6f9;
+  padding: 20px;
+}
+
+h2 {
+  text-align: center;
+}
+
+.upload-box {
+  border: 2px dashed #007bff;
+  padding: 20px;
+  text-align: center;
+  background: #fff;
+  margin-bottom: 20px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: #fff;
+  margin-top: 20px;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 6px;
+  font-size: 12px;
+}
+
+th {
+  background: #007bff;
+  color: white;
+}
+
+button {
+  padding: 10px 15px;
+  margin: 5px;
+  border: none;
+  background: #28a745;
+  color: white;
+  cursor: pointer;
+}
+
+button:hover {
+  opacity: 0.8;
+}
+
+</style>
+</head>
+
+<body>
+
+<h2>EDI 856 File Parser & Converter</h2>
+
+<div class="upload-box">
+  <input type="file" id="fileInput" multiple>
+  <br><br>
+  <button onclick="processFiles()">Process Files</button>
+</div>
+
+<div>
+  <button onclick="downloadExcel()">Download Excel</button>
+  <button onclick="downloadHTML()">Download HTML</button>
+</div>
+
+<table id="outputTable"></table>
+
+<script>
+
+let finalData = [];
+
+function processFiles() {
+  const files = document.getElementById('fileInput').files;
+  finalData = [];
+
+  let promises = [];
+
+  for (let file of files) {
+    promises.push(readFile(file));
+  }
+
+  Promise.all(promises).then(() => {
+    renderTable();
+  });
+}
+
+function readFile(file) {
+  return new Promise((resolve) => {
+    let reader = new FileReader();
+
+    reader.onload = function(e) {
+      parseEDI(e.target.result);
+      resolve();
+    };
+
+    reader.readAsText(file);
+  });
+}
+
+function parseEDI(text) {
+
+  let segments = text.split(/\r?\n/);
+
+  segments.forEach(segment => {
+
+    if (!segment.trim()) return;
+
+    let elements = segment.split("^");
+
+    let record = {
+      Segment: elements[0] || "",
+      E1: elements[1] || "",
+      E2: elements[2] || "",
+      E3: elements[3] || "",
+      E4: elements[4] || "",
+      E5: elements[5] || "",
+      Raw: segment
+    };
+
+    // Intelligent Mapping based on 856
+    switch(elements[0]) {
+
+      case "BSN":
+        record.Type = "Shipment Header";
+        record.Shipment_ID = elements[2];
+        record.Date = elements[3];
+        break;
+
+      case "DTM":
+        record.Type = "Date/Time";
+        record.Date_Type = elements[1];
+        record.Date = elements[2];
+        break;
+
+      case "HL":
+        record.Type = "Hierarchy";
+        record.Level_Code = elements[3];
+        break;
+
+      case "LIN":
+        record.Type = "Item";
+        record.Item_Code = elements[3];
+        break;
+
+      case "SN1":
+        record.Type = "Quantity";
+        record.Quantity = elements[2];
+        break;
+
+      case "REF":
+        record.Type = "Reference";
+        record.Ref_Qual = elements[1];
+        record.Ref_Value = elements[2];
+        break;
+
+      default:
+        record.Type = "Other";
+    }
+
+    finalData.push(record);
+  });
+}
+
+function renderTable() {
+
+  let table = document.getElementById("outputTable");
+  table.innerHTML = "";
+
+  let headers = Object.keys(finalData[0]);
+
+  let thead = "<tr>";
+  headers.forEach(h => thead += `<th>${h}</th>`);
+  thead += "</tr>";
+
+  table.innerHTML += thead;
+
+  finalData.forEach(row => {
+    let tr = "<tr>";
+    headers.forEach(h => {
+      tr += `<td>${row[h] || ""}</td>`;
+    });
+    tr += "</tr>";
+    table.innerHTML += tr;
+  });
+}
+
+function downloadExcel() {
+
+  let table = document.getElementById("outputTable").outerHTML;
+
+  let blob = new Blob([table], { type: "application/vnd.ms-excel" });
+  let link = document.createElement("a");
+
+  link.href = URL.createObjectURL(blob);
+  link.download = "EDI_856_Report.xls";
+  link.click();
+}
+
+function downloadHTML() {
+
+  let html = `
+  <html>
+  <head>
+    <style>
+      table { border-collapse: collapse; width:100%;}
+      th, td { border:1px solid #000; padding:5px;}
+      th { background:#007bff; color:white;}
+    </style>
+  </head>
+  <body>
+  ${document.getElementById("outputTable").outerHTML}
+  </body>
+  </html>`;
+
+  let blob = new Blob([html], { type: "text/html" });
+
+  let link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "EDI_856_Report.html";
+  link.click();
+}
+
+</script>
+
+</body>
+</html>

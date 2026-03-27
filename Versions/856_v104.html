@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>HP 856 Enterprise EDI Tool</title>
+
+<style>
+body { font-family: Arial; background:#f4f6f9; padding:20px;}
+h2 { text-align:center; }
+
+.box { background:#fff; padding:15px; margin-bottom:15px; border-radius:8px; }
+
+table { border-collapse: collapse; width:100%; margin-top:10px;}
+th, td { border:1px solid #ccc; padding:6px; font-size:12px;}
+th { background:#007bff; color:white;}
+
+button { padding:8px 12px; margin:5px; background:#28a745; color:white; border:none; cursor:pointer;}
+select, input { padding:5px; margin:5px; }
+
+.error { color:red; font-size:12px; }
+
+</style>
+</head>
+
+<body>
+
+<h2>HP 856 Enterprise EDI Tool</h2>
+
+<div class="box">
+<input type="file" id="files" multiple>
+<button onclick="processFiles()">Process Files</button>
+</div>
+
+<div class="box">
+<h3>Field Mapping (Dynamic)</h3>
+
+<label>AWB / Tracking:</label>
+<select id="map_tracking">
+<option value="MAN">MAN Segment</option>
+<option value="REF_BM">REF*BM</option>
+<option value="REF_CN">REF*CN</option>
+</select>
+
+<label>Reference:</label>
+<select id="map_ref">
+<option value="REF_DP">REF*DP</option>
+<option value="REF_IA">REF*IA</option>
+</select>
+</div>
+
+<div class="box">
+<button onclick="downloadExcel()">Download Excel</button>
+<button onclick="downloadErrors()">Download Errors</button>
+</div>
+
+<div class="box">
+<h3>Data Preview</h3>
+<table id="table"></table>
+</div>
+
+<div class="box">
+<h3>Validation Errors</h3>
+<div id="errors"></div>
+</div>
+
+<script>
+
+let finalData = [];
+let errorLog = [];
+
+async function processFiles() {
+
+  finalData = [];
+  errorLog = [];
+
+  let files = document.getElementById('files').files;
+
+  for (let f of files) {
+    let text = await f.text();
+    processEDI(text);
+  }
+
+  render();
+  renderErrors();
+}
+
+// 🔥 ENTERPRISE PARSER
+function processEDI(text) {
+
+  let segments = text.split(/\r?\n/);
+
+  let ctx = {
+    shipment:{},
+    order:{},
+    tare:{},
+    pack:{},
+    item:{}
+  };
+
+  let mapTracking = document.getElementById("map_tracking").value;
+  let mapRef = document.getElementById("map_ref").value;
+
+  segments.forEach(seg => {
+
+    if (!seg.trim()) return;
+
+    let e = seg.split("^");
+    let tag = e[0];
+
+    if(tag==="BSN"){
+      ctx.shipment.id = e[2];
+      ctx.shipment.date = e[3];
+    }
+
+    if(tag==="HL"){
+      let lvl = e[3];
+      if(lvl==="S"){ ctx.tare={}; ctx.pack={}; ctx.item={}; }
+      if(lvl==="O") ctx.order={};
+      if(lvl==="T") ctx.tare={};
+      if(lvl==="P") ctx.pack={};
+      if(lvl==="I") ctx.item={};
+    }
+
+    if(tag==="PRF"){
+      ctx.order.po = e[1];
+    }
+
+    if(tag==="N1"){
+      if(e[1]==="SF") ctx.shipment.from = e[2];
+      if(e[1]==="ST") ctx.shipment.to = e[2];
+    }
+
+    if(tag==="REF"){
+      ctx.shipment["REF_"+e[1]] = e[2];
+    }
+
+    if(tag==="MAN"){
+      ctx.pack.man = e[2];
+    }
+
+    if(tag==="CLD"){
+      ctx.tare.pallet = e[1];
+    }
+
+    if(tag==="LIN"){
+      ctx.item.id = e[3];
+    }
+
+    if(tag==="SN1"){
+
+      ctx.item.qty = e[2];
+      ctx.item.uom = e[3];
+
+      let row = {
+        Shipment_ID: ctx.shipment.id || "",
+        Shipment_Date: ctx.shipment.date || "",
+        PO: ctx.order.po || "",
+        Item: ctx.item.id || "",
+        Qty: ctx.item.qty || "",
+        UOM: ctx.item.uom || "",
+        From: ctx.shipment.from || "",
+        To: ctx.shipment.to || "",
+        Pallet: ctx.tare.pallet || ""
+      };
+
+      // 🔥 Dynamic Mapping
+      if(mapTracking==="MAN") row.Tracking = ctx.pack.man || "";
+      else row.Tracking = ctx.shipment[mapTracking] || "";
+
+      row.Reference = ctx.shipment[mapRef] || "";
+
+      // 🔥 VALIDATION
+      validateRow(row);
+
+      finalData.push(row);
+    }
+
+  });
+}
+
+// 🔥 VALIDATION ENGINE
+function validateRow(row){
+
+  if(!row.Shipment_ID){
+    errorLog.push("Missing Shipment ID");
+  }
+
+  if(!row.PO){
+    errorLog.push("Missing PO Number");
+  }
+
+  if(!row.Item){
+    errorLog.push("Missing Item ID");
+  }
+
+  if(!row.Qty){
+    errorLog.push("Missing Quantity");
+  }
+
+}
+
+// ===== RENDER =====
+function render(){
+
+  let table = document.getElementById("table");
+  table.innerHTML="";
+
+  if(finalData.length===0) return;
+
+  let headers = Object.keys(finalData[0]);
+
+  let tr="<tr>";
+  headers.forEach(h=> tr+=`<th>${h}</th>`);
+  tr+="</tr>";
+
+  table.innerHTML+=tr;
+
+  finalData.forEach(r=>{
+    let row="<tr>";
+    headers.forEach(h=>{
+      row+=`<td>${r[h]||""}</td>`;
+    });
+    row+="</tr>";
+    table.innerHTML+=row;
+  });
+
+}
+
+// ===== ERROR RENDER =====
+function renderErrors(){
+  let div = document.getElementById("errors");
+  div.innerHTML="";
+
+  errorLog.forEach(e=>{
+    div.innerHTML += `<div class="error">${e}</div>`;
+  });
+}
+
+// ===== DOWNLOAD =====
+function downloadExcel(){
+
+  let table = document.getElementById("table").outerHTML;
+
+  let blob = new Blob([table], {type:"application/vnd.ms-excel"});
+
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="HP_856_Enterprise.xls";
+  a.click();
+}
+
+function downloadErrors(){
+
+  let blob = new Blob([errorLog.join("\n")], {type:"text/plain"});
+
+  let a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="Errors.txt";
+  a.click();
+}
+
+</script>
+
+</body>
+</html>

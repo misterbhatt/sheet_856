@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HP 856 Shipment Report Tool</title>
+
+<style>
+body {
+  font-family: Arial;
+  background: #f4f6f9;
+  padding: 20px;
+}
+
+h2 {
+  text-align: center;
+}
+
+.upload-box {
+  border: 2px dashed #007bff;
+  padding: 25px;
+  text-align: center;
+  background: white;
+  margin-bottom: 20px;
+}
+
+button {
+  padding: 10px 15px;
+  margin: 5px;
+  border: none;
+  background: #28a745;
+  color: white;
+  cursor: pointer;
+}
+
+button:hover {
+  opacity: 0.85;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: white;
+  margin-top: 20px;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 6px;
+  font-size: 12px;
+}
+
+th {
+  background: #007bff;
+  color: white;
+}
+
+</style>
+</head>
+
+<body>
+
+<h2>HP 856 Shipment-wise Report Generator</h2>
+
+<div class="upload-box">
+  <input type="file" id="fileInput" multiple>
+  <br><br>
+  <button onclick="processFiles()">Process Files</button>
+</div>
+
+<div>
+  <button onclick="downloadExcel()">Download Excel</button>
+  <button onclick="downloadHTML()">Download HTML</button>
+</div>
+
+<table id="outputTable"></table>
+
+<script>
+
+let finalData = [];
+
+async function processFiles() {
+
+  finalData = [];
+  const files = document.getElementById('fileInput').files;
+
+  let promises = [];
+
+  for (let file of files) {
+    promises.push(readFile(file));
+  }
+
+  await Promise.all(promises);
+
+  renderTable();
+}
+
+function readFile(file) {
+  return new Promise((resolve) => {
+    let reader = new FileReader();
+
+    reader.onload = function(e) {
+      parseEDI(e.target.result);
+      resolve();
+    };
+
+    reader.readAsText(file);
+  });
+}
+
+// 🔥 CORE LOGIC (HP 856 BUSINESS VIEW)
+function parseEDI(text) {
+
+  let segments = text.split(/\r?\n/);
+
+  let current = {
+    shipment: {},
+    order: {},
+    tare: {},
+    pack: {},
+    item: {}
+  };
+
+  segments.forEach(seg => {
+
+    if (!seg.trim()) return;
+
+    let e = seg.split("^");
+    let tag = e[0];
+
+    switch(tag) {
+
+      // ===== Shipment Header =====
+      case "BSN":
+        current.shipment = {
+          Shipment_ID: e[2],
+          Shipment_Date: e[3],
+          Shipment_Time: e[4]
+        };
+        break;
+
+      // ===== Hierarchy =====
+      case "HL":
+        let level = e[3];
+
+        if (level === "S") {
+          current.tare = {};
+          current.pack = {};
+          current.item = {};
+        }
+
+        if (level === "O") current.order = {};
+        if (level === "T") current.tare = {};
+        if (level === "P") current.pack = {};
+        if (level === "I") current.item = {};
+        break;
+
+      // ===== Order =====
+      case "PRF":
+        current.order.PO_Number = e[1];
+        break;
+
+      // ===== Party =====
+      case "N1":
+        if (e[1] === "SF") current.shipment.From = e[2];
+        if (e[1] === "ST") current.shipment.To = e[2];
+        break;
+
+      // ===== Reference =====
+      case "REF":
+        current.shipment.Reference = e[2];
+        break;
+
+      // ===== Pallet =====
+      case "CLD":
+        if (!current.pack.Carton_ID) {
+          current.tare.Pallet_ID = "PLT_" + (e[1] || "");
+        }
+        break;
+
+      // ===== Carton / Tracking =====
+      case "MAN":
+        current.pack.Carton_ID = e[2];
+        current.pack.Tracking_Number = e[2];
+        break;
+
+      // ===== Item =====
+      case "LIN":
+        current.item.Item_ID = e[3];
+        break;
+
+      case "SN1":
+
+        current.item.Quantity = e[2];
+        current.item.UOM = e[3];
+
+        // 🔥 FINAL FLATTENED ROW
+        finalData.push({
+          Shipment_ID: current.shipment.Shipment_ID || "",
+          Shipment_Date: current.shipment.Shipment_Date || "",
+          PO_Number: current.order.PO_Number || "",
+          Item_ID: current.item.Item_ID || "",
+          Quantity: current.item.Quantity || "",
+          UOM: current.item.UOM || "",
+          Carton_ID: current.pack.Carton_ID || "",
+          Pallet_ID: current.tare.Pallet_ID || "",
+          Tracking_Number: current.pack.Tracking_Number || "",
+          Reference: current.shipment.Reference || "",
+          From: current.shipment.From || "",
+          To: current.shipment.To || ""
+        });
+
+        break;
+    }
+  });
+}
+
+// ===== TABLE RENDER =====
+function renderTable() {
+
+  let table = document.getElementById("outputTable");
+  table.innerHTML = "";
+
+  if (finalData.length === 0) return;
+
+  let headers = Object.keys(finalData[0]);
+
+  let thead = "<tr>";
+  headers.forEach(h => thead += `<th>${h}</th>`);
+  thead += "</tr>";
+
+  table.innerHTML += thead;
+
+  finalData.forEach(row => {
+    let tr = "<tr>";
+    headers.forEach(h => {
+      tr += `<td>${row[h] || ""}</td>`;
+    });
+    tr += "</tr>";
+    table.innerHTML += tr;
+  });
+}
+
+// ===== EXCEL DOWNLOAD =====
+function downloadExcel() {
+
+  let table = document.getElementById("outputTable").outerHTML;
+
+  let blob = new Blob([table], {
+    type: "application/vnd.ms-excel"
+  });
+
+  let link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "HP_856_Shipment_Report.xls";
+  link.click();
+}
+
+// ===== HTML DOWNLOAD =====
+function downloadHTML() {
+
+  let html = `
+  <html>
+  <head>
+  <style>
+  table { border-collapse: collapse; width:100%;}
+  th, td { border:1px solid #000; padding:5px;}
+  th { background:#007bff; color:white;}
+  </style>
+  </head>
+  <body>
+  ${document.getElementById("outputTable").outerHTML}
+  </body>
+  </html>`;
+
+  let blob = new Blob([html], { type: "text/html" });
+
+  let link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "HP_856_Shipment_Report.html";
+  link.click();
+}
+
+</script>
+
+</body>
+</html>

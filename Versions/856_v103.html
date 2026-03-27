@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>HP 856 Smart Parser (Future-Proof)</title>
+
+<style>
+body { font-family: Arial; background:#f4f6f9; padding:20px;}
+.upload-box { border:2px dashed #007bff; padding:20px; text-align:center; background:#fff;}
+table { border-collapse: collapse; width:100%; margin-top:20px;}
+th, td { border:1px solid #ccc; padding:6px; font-size:12px;}
+th { background:#007bff; color:white;}
+button { padding:10px; margin:5px; background:#28a745; color:white; border:none;}
+</style>
+</head>
+
+<body>
+
+<h2>HP 856 Dynamic Business View Tool</h2>
+
+<div class="upload-box">
+<input type="file" id="fileInput" multiple>
+<br><br>
+<button onclick="processFiles()">Process</button>
+</div>
+
+<button onclick="downloadExcel()">Download Excel</button>
+
+<table id="table"></table>
+
+<script>
+
+let finalData = [];
+
+async function processFiles() {
+
+  finalData = [];
+  let files = document.getElementById('fileInput').files;
+
+  let promises = [];
+  for (let f of files) promises.push(readFile(f));
+
+  await Promise.all(promises);
+
+  render();
+}
+
+function readFile(file) {
+  return new Promise(res => {
+    let r = new FileReader();
+    r.onload = e => {
+      processEDI(e.target.result);
+      res();
+    };
+    r.readAsText(file);
+  });
+}
+
+// 🔥 CORE FUTURE-PROOF ENGINE
+function processEDI(text) {
+
+  let segments = text.split(/\r?\n/);
+
+  let context = {
+    shipment:{},
+    order:{},
+    tare:{},
+    pack:{},
+    item:{}
+  };
+
+  segments.forEach(seg => {
+
+    if (!seg.trim()) return;
+
+    let e = seg.split("^");
+    let tag = e[0];
+
+    // 🔥 STORE ALL SEGMENTS (future safe)
+    let segmentObj = {};
+    e.forEach((val, i) => segmentObj["E"+i] = val);
+
+    // ================= DYNAMIC LOGIC =================
+
+    if(tag === "BSN") {
+      context.shipment.id = e[2];
+      context.shipment.date = e[3];
+    }
+
+    if(tag === "DTM") {
+      let qualifier = e[1];
+      context.shipment["DTM_"+qualifier] = e[2];
+    }
+
+    if(tag === "HL") {
+      let level = e[3];
+      if(level==="S") { context.tare={}; context.pack={}; context.item={}; }
+      if(level==="O") context.order={};
+      if(level==="T") context.tare={};
+      if(level==="P") context.pack={};
+      if(level==="I") context.item={};
+    }
+
+    if(tag === "PRF") {
+      context.order.PO = e[1];
+    }
+
+    if(tag === "N1") {
+      context.shipment["N1_"+e[1]] = e[2];
+    }
+
+    if(tag === "REF") {
+      context.shipment["REF_"+e[1]] = e[2];
+    }
+
+    if(tag === "MAN") {
+      context.pack.tracking = e[2];
+    }
+
+    if(tag === "CLD") {
+      context.tare.pallet = "PLT_"+(e[1]||"");
+    }
+
+    if(tag === "LIN") {
+      context.item.id = e[3];
+    }
+
+    if(tag === "SN1") {
+
+      context.item.qty = e[2];
+      context.item.uom = e[3];
+
+      // 🔥 BUILD FLEXIBLE ROW
+      let row = {
+        Shipment_ID: context.shipment.id || "",
+        Shipment_Date: context.shipment.date || "",
+        PO_Number: context.order.PO || "",
+        Item_ID: context.item.id || "",
+        Quantity: context.item.qty || "",
+        UOM: context.item.uom || "",
+        Carton: context.pack.tracking || "",
+        Pallet: context.tare.pallet || "",
+        From: context.shipment["N1_SF"] || "",
+        To: context.shipment["N1_ST"] || ""
+      };
+
+      // 🔥 ADD ALL EXTRA FIELDS DYNAMICALLY
+      Object.keys(context.shipment).forEach(k=>{
+        if(!row[k]) row[k]=context.shipment[k];
+      });
+
+      finalData.push(row);
+    }
+
+  });
+}
+
+// ===== RENDER =====
+function render() {
+
+  let table = document.getElementById("table");
+  table.innerHTML = "";
+
+  if(finalData.length===0) return;
+
+  let headers = new Set();
+
+  finalData.forEach(r=>{
+    Object.keys(r).forEach(k=>headers.add(k));
+  });
+
+  headers = Array.from(headers);
+
+  let thead = "<tr>";
+  headers.forEach(h=>thead += `<th>${h}</th>`);
+  thead += "</tr>";
+
+  table.innerHTML += thead;
+
+  finalData.forEach(r=>{
+    let tr="<tr>";
+    headers.forEach(h=>{
+      tr+= `<td>${r[h]||""}</td>`;
+    });
+    tr+="</tr>";
+    table.innerHTML += tr;
+  });
+}
+
+// ===== DOWNLOAD =====
+function downloadExcel() {
+
+  let table = document.getElementById("table").outerHTML;
+
+  let blob = new Blob([table], {type:"application/vnd.ms-excel"});
+
+  let a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "HP_856_Dynamic_Report.xls";
+  a.click();
+}
+
+</script>
+
+</body>
+</html>
